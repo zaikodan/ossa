@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './infra/prisma/prisma.module';
+import { RedisModule } from './infra/redis/redis.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { HealthModule } from './health/health.module';
 import { ConversationsModule } from './conversations/conversations.module';
@@ -15,6 +16,7 @@ import { ConversationsModule } from './conversations/conversations.module';
   imports: [
     ConfigModule,
     PrismaModule,
+    RedisModule,
     RealtimeModule,
     HealthModule,
     ConversationsModule,

@@ -101,7 +101,7 @@ export class ConversationsService {
     const peerId = peer?.userId;
     const peerLastReadAt = peer?.lastReadAt ?? EPOCH;
     const now = new Date();
-    const delivered = !!peerId && this.gateway.isOnline(peerId);
+    const delivered = !!peerId && (await this.gateway.isOnline(peerId));
     const status = delivered ? MessageStatus.DELIVERED : MessageStatus.SENT;
 
     const [message] = await this.prisma.$transaction([
@@ -229,10 +229,9 @@ export class ConversationsService {
     for (const c of convs) {
       for (const p of c.participants) if (p.userId !== userId) peers.add(p.userId);
     }
+    // Publica pra cada peer; o canal só entrega a quem estiver conectado.
     for (const peerId of peers) {
-      if (this.gateway.isOnline(peerId)) {
-        this.gateway.pushToUser(peerId, { type: 'presence', userId, online });
-      }
+      this.gateway.pushToUser(peerId, { type: 'presence', userId, online });
     }
   }
 
