@@ -4,6 +4,7 @@
   "description": "Ossa — realtime 1:1 messaging engine: native WebSocket + Redis, with presence, typing indicators and delivery/read receipts.",
   "license": "MIT",
   "private": false,
+  "packageManager": "pnpm@11.9.0",
   "engines": {
     "node": ">=20"
   },
