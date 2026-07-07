@@ -55,12 +55,29 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data)); // { type: "ready", userI
 `Message` (`SENT | DELIVERED | READ`). N participants (1:1 today, group-ready).
 See [`prisma/schema.prisma`](prisma/schema.prisma).
 
+## REST API
+
+All routes require `Authorization: Bearer <platform-jwt>`. Ossa is
+**identity-agnostic**: it speaks in `userId`/`peerId` strings and has no user
+profiles — mapping `peerId` to a display name/avatar is the consumer's job.
+
+| Method | Path                          | Body        | Result                                  |
+| ------ | ----------------------------- | ----------- | --------------------------------------- |
+| `POST` | `/conversations`              | `{ peerId }`| open or reuse the 1:1 conversation      |
+| `GET`  | `/conversations`              | —           | caller's conversations (peer, last, unread) |
+| `GET`  | `/conversations/:id`          | —           | one conversation (or `null` if not a member) |
+| `GET`  | `/conversations/:id/messages` | —           | messages (marks them read on the caller's side) |
+| `POST` | `/conversations/:id/messages` | `{ text }`  | send a message                          |
+
+Read receipts (`sent | delivered | read`) are derived from each side's read
+pointer; realtime `delivered` lands with the WebSocket protocol (M2).
+
 ## Roadmap
 
 - [x] Scaffold: NestJS + Prisma + Redis + docker-compose + CI
 - [x] Authenticated WebSocket server (JWT), registry, heartbeat, presence, push
-- [ ] REST parity with the messaging contract (list/get/messages/send/start)
-- [ ] Realtime protocol: `message:send/new`, `typing`, `read` + receipts
+- [x] REST API: conversations & messages (unread + read receipts), JWT-guarded
+- [ ] Realtime protocol: `message:send/new`, `typing`, `read` + live receipts
 - [ ] Redis pub/sub fan-out (multi-instance) + distributed presence
 - [ ] Media messages (gated/signed URLs), push notifications, reactions, reply
 - [ ] Tests + coverage
