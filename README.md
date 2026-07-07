@@ -70,14 +70,41 @@ profiles — mapping `peerId` to a display name/avatar is the consumer's job.
 | `POST` | `/conversations/:id/messages` | `{ text }`  | send a message                          |
 
 Read receipts (`sent | delivered | read`) are derived from each side's read
-pointer; realtime `delivered` lands with the WebSocket protocol (M2).
+pointer, kept live by the realtime protocol below.
+
+## Realtime protocol (WebSocket `/ws`)
+
+Connect with `ws://…/ws?token=<platform-jwt>`. On success the server sends
+`{ type: "ready", userId }`. The client derives `fromMe` from `senderId`.
+
+**Client → server**
+
+| Event | Payload | Effect |
+| ----- | ------- | ------ |
+| `message:send` | `{ conversationId, text }` | persist + deliver to the peer |
+| `read` | `{ conversationId }` | mark the peer's messages read |
+| `typing` | `{ conversationId, typing }` | relay a typing indicator |
+| `ping` | — | `pong` heartbeat |
+
+**Server → client**
+
+| Event | Payload |
+| ----- | ------- |
+| `message:new` | `{ message: { id, conversationId, senderId, text, status, createdAt } }` |
+| `message:delivered` | `{ conversationId, messageId }` — the peer received it (or came online) |
+| `message:read` | `{ conversationId, readerId, readAt }` — the peer read it |
+| `typing` | `{ conversationId, userId, typing }` |
+| `presence` | `{ userId, online }` |
+
+Messages sent while the peer is offline are marked **delivered** and the sender
+is notified the moment the peer reconnects.
 
 ## Roadmap
 
 - [x] Scaffold: NestJS + Prisma + Redis + docker-compose + CI
 - [x] Authenticated WebSocket server (JWT), registry, heartbeat, presence, push
 - [x] REST API: conversations & messages (unread + read receipts), JWT-guarded
-- [ ] Realtime protocol: `message:send/new`, `typing`, `read` + live receipts
+- [x] Realtime protocol: `message:new`, `typing`, live `delivered`/`read`, presence
 - [ ] Redis pub/sub fan-out (multi-instance) + distributed presence
 - [ ] Media messages (gated/signed URLs), push notifications, reactions, reply
 - [ ] Tests + coverage
