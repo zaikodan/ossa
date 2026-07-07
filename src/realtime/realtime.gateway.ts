@@ -12,6 +12,17 @@ interface UserSocket extends WebSocket {
   isAlive?: boolean;
 }
 
+/** Evento vindo do cliente pelo WebSocket. */
+export interface ClientEvent {
+  type: string;
+  conversationId?: string;
+  text?: string;
+  typing?: boolean;
+}
+
+export type ClientEventHandler = (userId: string, event: ClientEvent) => void;
+export type PresenceHandler = (userId: string, online: boolean) => void;
+
 /**
  * Servidor WebSocket nativo (`ws`). Núcleo do tempo real do Ossa:
  *  - autentica a conexão pelo JWT da plataforma (`?token=`);
@@ -27,8 +38,20 @@ export class RealtimeGateway {
   private readonly log = new Logger(RealtimeGateway.name);
   private wss?: WebSocketServer;
   private readonly clients = new Map<string, Set<UserSocket>>();
+  private clientEventHandler?: ClientEventHandler;
+  private presenceHandler?: PresenceHandler;
 
   constructor(@Inject(ENV) private readonly env: Env) {}
+
+  /** Registra quem trata os eventos do cliente (message:send, typing, read). */
+  setClientEventHandler(handler: ClientEventHandler): void {
+    this.clientEventHandler = handler;
+  }
+
+  /** Registra quem trata mudanças de presença (online/offline). */
+  setPresenceHandler(handler: PresenceHandler): void {
+    this.presenceHandler = handler;
+  }
 
   /** Anexa o WS ao mesmo HTTP server do Nest (chamado no bootstrap). */
   attach(server: Server): void {
@@ -76,15 +99,19 @@ export class RealtimeGateway {
   }
 
   private onMessage(socket: UserSocket, raw: string): void {
-    let msg: { type?: string };
+    let msg: ClientEvent;
     try {
-      msg = JSON.parse(raw);
+      msg = JSON.parse(raw) as ClientEvent;
     } catch {
       return;
     }
-    // Fase 1: só ping/pong da aplicação. O protocolo real
-    // (message:send, typing, read) é adicionado em cima disto.
-    if (msg.type === 'ping') this.send(socket, { type: 'pong', t: Date.now() });
+    if (!msg || typeof msg.type !== 'string') return;
+    if (msg.type === 'ping') {
+      this.send(socket, { type: 'pong', t: Date.now() });
+      return;
+    }
+    // Protocolo de mensageria (message:send, typing, read) — tratado fora.
+    if (socket.userId) this.clientEventHandler?.(socket.userId, msg);
   }
 
   // --- Registro / presença -----------------------------------------------
@@ -110,9 +137,9 @@ export class RealtimeGateway {
     return this.count(userId) > 0;
   }
 
-  /** Hook de presença — vira evento/Redis quando o fan-out entrar. */
   private onPresenceChange(userId: string, online: boolean): void {
     this.log.debug(`presença ${userId} -> ${online ? 'online' : 'offline'}`);
+    this.presenceHandler?.(userId, online);
   }
 
   // --- Envio ---------------------------------------------------------------

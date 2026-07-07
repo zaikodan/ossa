@@ -4,8 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, type Message, type Participant } from '@prisma/client';
+import {
+  MessageStatus,
+  Prisma,
+  type Message,
+  type Participant,
+} from '@prisma/client';
 import { PrismaService } from '../infra/prisma/prisma.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import type {
   ConversationDto,
   MessageDto,
@@ -24,14 +30,17 @@ type ConvRow = Prisma.ConversationGetPayload<{
 }>;
 
 /**
- * Conversas 1:1 e mensagens (persistência). Recibos derivados dos ponteiros
- * de leitura por participante. O tempo real (push/entregue) entra no Milestone 2.
+ * Conversas 1:1 + mensagens. Persistência (Prisma) + emissão em tempo real
+ * (RealtimeGateway): entrega ao destinatário, recibos DELIVERED/READ ao vivo,
+ * e entrega das pendentes quando o usuário reconecta.
  */
 @Injectable()
 export class ConversationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gateway: RealtimeGateway,
+  ) {}
 
-  /** Abre (ou reusa) a conversa 1:1 entre o usuário e um peer. */
   async getOrCreate(userId: string, peerId: string): Promise<ConversationDto> {
     if (userId === peerId) {
       throw new BadRequestException('Não é possível conversar consigo mesmo.');
@@ -74,48 +83,179 @@ export class ConversationsService {
   }
 
   async getMessages(userId: string, id: string): Promise<{ items: MessageDto[] }> {
-    const conv = await this.prisma.conversation.findUnique({
-      where: { id },
-      include: { participants: true },
-    });
-    if (!conv || !this.isParticipant(conv.participants, userId)) {
-      throw new NotFoundException('Conversa não encontrada.');
-    }
+    const conv = await this.requireParticipant(userId, id);
     const peerLastReadAt = this.peer(conv.participants, userId)?.lastReadAt ?? EPOCH;
     const messages = await this.prisma.message.findMany({
       where: { conversationId: id },
       orderBy: { createdAt: 'asc' },
     });
-    // Marca as mensagens como lidas do meu lado.
-    await this.prisma.participant.updateMany({
-      where: { conversationId: id, userId },
-      data: { lastReadAt: new Date() },
-    });
+    // Abrir a conversa = marcar como lida (atualiza ponteiro + avisa o peer).
+    await this.markRead(userId, id);
     return { items: messages.map((m) => this.toMessageDto(m, userId, peerLastReadAt)) };
   }
 
+  /** Envia uma mensagem. Persiste, entrega em tempo real e devolve o recibo. */
   async send(userId: string, id: string, text: string): Promise<MessageDto> {
-    const conv = await this.prisma.conversation.findUnique({
-      where: { id },
-      include: { participants: true },
-    });
-    if (!conv || !this.isParticipant(conv.participants, userId)) {
-      throw new ForbiddenException('Você não participa desta conversa.');
-    }
-    const peerLastReadAt = this.peer(conv.participants, userId)?.lastReadAt ?? EPOCH;
+    const conv = await this.requireParticipant(userId, id, ForbiddenException);
+    const peer = this.peer(conv.participants, userId);
+    const peerId = peer?.userId;
+    const peerLastReadAt = peer?.lastReadAt ?? EPOCH;
     const now = new Date();
+    const delivered = !!peerId && this.gateway.isOnline(peerId);
+    const status = delivered ? MessageStatus.DELIVERED : MessageStatus.SENT;
+
     const [message] = await this.prisma.$transaction([
-      this.prisma.message.create({ data: { conversationId: id, senderId: userId, text } }),
+      this.prisma.message.create({
+        data: { conversationId: id, senderId: userId, text, status },
+      }),
       this.prisma.conversation.update({ where: { id }, data: { lastMessageAt: now } }),
       this.prisma.participant.updateMany({
         where: { conversationId: id, userId },
         data: { lastReadAt: now },
       }),
+      ...(delivered && peerId
+        ? [
+            this.prisma.participant.updateMany({
+              where: { conversationId: id, userId: peerId },
+              data: { lastDeliveredAt: now },
+            }),
+          ]
+        : []),
     ]);
+
+    // Tempo real: entrega ao peer + eco pros outros aparelhos do remetente.
+    const event = this.toMessageEvent(message);
+    if (peerId) this.gateway.pushToUser(peerId, { type: 'message:new', message: event });
+    this.gateway.pushToUser(userId, { type: 'message:new', message: event });
+    if (delivered) {
+      this.gateway.pushToUser(userId, {
+        type: 'message:delivered',
+        conversationId: id,
+        messageId: message.id,
+      });
+    }
     return this.toMessageDto(message, userId, peerLastReadAt);
   }
 
+  /** Marca as mensagens do peer como lidas e avisa o peer (recibo azul). */
+  async markRead(userId: string, id: string): Promise<void> {
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id },
+      include: { participants: true },
+    });
+    if (!conv || !this.isParticipant(conv.participants, userId)) return;
+    const peerId = this.peer(conv.participants, userId)?.userId;
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.participant.updateMany({
+        where: { conversationId: id, userId },
+        data: { lastReadAt: now },
+      }),
+      this.prisma.message.updateMany({
+        where: {
+          conversationId: id,
+          senderId: peerId ?? '',
+          status: { not: MessageStatus.READ },
+        },
+        data: { status: MessageStatus.READ },
+      }),
+    ]);
+    if (peerId) {
+      this.gateway.pushToUser(peerId, {
+        type: 'message:read',
+        conversationId: id,
+        readerId: userId,
+        readAt: now.toISOString(),
+      });
+    }
+  }
+
+  /** Relay efêmero de "digitando…" para o peer (sem persistir). */
+  async relayTyping(userId: string, id: string, typing: boolean): Promise<void> {
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id },
+      include: { participants: true },
+    });
+    if (!conv || !this.isParticipant(conv.participants, userId)) return;
+    const peerId = this.peer(conv.participants, userId)?.userId;
+    if (peerId) {
+      this.gateway.pushToUser(peerId, { type: 'typing', conversationId: id, userId, typing });
+    }
+  }
+
+  /** Quando o usuário fica online: entrega as mensagens pendentes e avisa remetentes. */
+  async deliverPending(userId: string): Promise<void> {
+    const convs = await this.prisma.conversation.findMany({
+      where: { participants: { some: { userId } } },
+      select: { id: true },
+    });
+    const convIds = convs.map((c) => c.id);
+    if (convIds.length === 0) return;
+    const pending = await this.prisma.message.findMany({
+      where: {
+        conversationId: { in: convIds },
+        senderId: { not: userId },
+        status: MessageStatus.SENT,
+      },
+    });
+    if (pending.length === 0) return;
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.message.updateMany({
+        where: { id: { in: pending.map((m) => m.id) } },
+        data: { status: MessageStatus.DELIVERED },
+      }),
+      this.prisma.participant.updateMany({
+        where: { conversationId: { in: convIds }, userId },
+        data: { lastDeliveredAt: now },
+      }),
+    ]);
+    for (const m of pending) {
+      this.gateway.pushToUser(m.senderId, {
+        type: 'message:delivered',
+        conversationId: m.conversationId,
+        messageId: m.id,
+      });
+    }
+  }
+
+  /** Propaga presença (online/offline) para os peers em conversas com o usuário. */
+  async broadcastPresence(userId: string, online: boolean): Promise<void> {
+    const convs = await this.prisma.conversation.findMany({
+      where: { participants: { some: { userId } } },
+      include: { participants: true },
+    });
+    const peers = new Set<string>();
+    for (const c of convs) {
+      for (const p of c.participants) if (p.userId !== userId) peers.add(p.userId);
+    }
+    for (const peerId of peers) {
+      if (this.gateway.isOnline(peerId)) {
+        this.gateway.pushToUser(peerId, { type: 'presence', userId, online });
+      }
+    }
+  }
+
   // --- helpers -------------------------------------------------------------
+
+  private async requireParticipant(
+    userId: string,
+    id: string,
+    Exception: typeof NotFoundException | typeof ForbiddenException = NotFoundException,
+  ): Promise<Prisma.ConversationGetPayload<{ include: { participants: true } }>> {
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id },
+      include: { participants: true },
+    });
+    if (!conv || !this.isParticipant(conv.participants, userId)) {
+      throw new Exception(
+        Exception === ForbiddenException
+          ? 'Você não participa desta conversa.'
+          : 'Conversa não encontrada.',
+      );
+    }
+    return conv;
+  }
 
   private isParticipant(participants: Participant[], userId: string): boolean {
     return participants.some((p) => p.userId === userId);
@@ -143,7 +283,6 @@ export class ConversationsService {
 
   private toMessageDto(m: Message, userId: string, peerLastReadAt: Date): MessageDto {
     const fromMe = m.senderId === userId;
-    // Recibo só faz sentido nas minhas mensagens (o peer já leu?).
     const status: MessageStatusDto =
       fromMe && peerLastReadAt >= m.createdAt
         ? 'read'
@@ -155,6 +294,25 @@ export class ConversationsService {
       fromMe,
       text: m.text,
       status,
+      createdAt: m.createdAt.toISOString(),
+    };
+  }
+
+  /** Payload de mensagem para o WebSocket (o cliente deriva `fromMe` pelo senderId). */
+  private toMessageEvent(m: Message): {
+    id: string;
+    conversationId: string;
+    senderId: string;
+    text: string;
+    status: MessageStatusDto;
+    createdAt: string;
+  } {
+    return {
+      id: m.id,
+      conversationId: m.conversationId,
+      senderId: m.senderId,
+      text: m.text,
+      status: m.status.toLowerCase() as MessageStatusDto,
       createdAt: m.createdAt.toISOString(),
     };
   }

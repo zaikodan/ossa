@@ -2,10 +2,14 @@ import { Module } from '@nestjs/common';
 import { JwtGuard } from '../auth/jwt.guard';
 import { ConversationsController } from './conversations.controller';
 import { ConversationsService } from './conversations.service';
+import { RealtimeMessagingService } from './realtime-messaging.service';
 
-/** Conversas 1:1 + mensagens (REST). Realtime entra via RealtimeModule (M2). */
+/**
+ * Conversas 1:1 + mensagens. REST (controller) + protocolo realtime
+ * (RealtimeMessagingService liga o RealtimeGateway ao domínio).
+ */
 @Module({
   controllers: [ConversationsController],
-  providers: [ConversationsService, JwtGuard],
+  providers: [ConversationsService, RealtimeMessagingService, JwtGuard],
 })
 export class ConversationsModule {}
