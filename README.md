@@ -99,15 +99,30 @@ Connect with `ws://…/ws?token=<platform-jwt>`. On success the server sends
 Messages sent while the peer is offline are marked **delivered** and the sender
 is notified the moment the peer reconnects.
 
+## Scaling (multi-instance)
+
+Ossa runs behind a load balancer with **no sticky sessions**. Each instance
+holds only its local sockets; cross-instance delivery goes through **Redis**:
+
+- `pushToUser` **publishes** to `ossa:user:{id}`; every instance subscribes to
+  that channel only for the users it currently holds, and delivers locally.
+- **Presence** is a global connection counter (`ossa:conns` hash); `online`
+  events fire only on the global offline↔online transition.
+
+> Caveat: the presence counter is decremented on disconnect but not yet
+> reconciled after an ungraceful instance crash — a per-instance heartbeat key
+> is the planned hardening.
+
 ## Roadmap
 
 - [x] Scaffold: NestJS + Prisma + Redis + docker-compose + CI
 - [x] Authenticated WebSocket server (JWT), registry, heartbeat, presence, push
 - [x] REST API: conversations & messages (unread + read receipts), JWT-guarded
 - [x] Realtime protocol: `message:new`, `typing`, live `delivered`/`read`, presence
-- [ ] Redis pub/sub fan-out (multi-instance) + distributed presence
+- [x] Redis pub/sub fan-out (multi-instance) + distributed presence
 - [ ] Media messages (gated/signed URLs), push notifications, reactions, reply
 - [ ] Tests + coverage
+- [ ] Presence crash-recovery (per-instance heartbeat)
 
 ## License
 
