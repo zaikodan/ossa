@@ -1,0 +1,54 @@
+// Ossa — modelo de dados da mensageria em tempo real.
+// Conversa com N participantes (usamos 1:1 hoje; o schema já suporta grupo).
+// Recibos estilo WhatsApp: SENT -> DELIVERED -> READ, com ponteiros por participante.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Conversation {
+  id            String        @id @default(cuid())
+  createdAt     DateTime      @default(now())
+  lastMessageAt DateTime      @default(now())
+  participants  Participant[]
+  messages      Message[]
+
+  @@index([lastMessageAt])
+}
+
+model Participant {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  // userId é do domínio da PLATAFORMA (Ossa não tem tabela de usuários própria;
+  // confia no JWT emitido pela plataforma). Ver README.
+  userId         String
+  lastReadAt      DateTime    @default(now())
+  lastDeliveredAt DateTime    @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String        @id @default(cuid())
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  senderId       String
+  text           String
+  status         MessageStatus @default(SENT)
+  createdAt      DateTime      @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+}
