@@ -6,8 +6,31 @@ on:
   pull_request:
 
 jobs:
-  build:
+  ci:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ossa
+          POSTGRES_PASSWORD: ossa
+          POSTGRES_DB: ossa
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U ossa"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ossa:ossa@localhost:5433/ossa?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci-secret-at-least-16-characters
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -17,4 +40,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm prisma:generate
+      - run: pnpm prisma migrate deploy
       - run: pnpm build
+      - run: pnpm test
