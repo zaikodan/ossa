@@ -6,6 +6,13 @@
 
 export type MessageStatusDto = 'sent' | 'delivered' | 'read';
 
+/** Reações agregadas por emoji (do ponto de vista do viewer). */
+export interface ReactionDto {
+  emoji: string;
+  count: number;
+  mine: boolean;
+}
+
 export interface ConversationDto {
   id: string;
   /** userId do outro participante (1:1). */
@@ -25,6 +32,7 @@ export interface MessageDto {
   /** Chave da mídia no storage da plataforma (Ossa não serve arquivos). */
   mediaKey: string | null;
   mediaKind: string | null;
+  reactions: ReactionDto[];
   status: MessageStatusDto;
   /** ISO-8601. */
   createdAt: string;

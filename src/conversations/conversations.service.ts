@@ -8,6 +8,7 @@ import {
   MessageStatus,
   Prisma,
   type Message,
+  type MessageReaction,
   type Participant,
 } from '@prisma/client';
 import { PrismaService } from '../infra/prisma/prisma.service';
@@ -16,8 +17,11 @@ import type {
   ConversationDto,
   MessageDto,
   MessageStatusDto,
+  ReactionDto,
   SendMessageInput,
 } from './conversations.dto';
+
+type MessageWithReactions = Message & { reactions?: MessageReaction[] };
 
 const EPOCH = new Date(0);
 
@@ -89,6 +93,7 @@ export class ConversationsService {
     const messages = await this.prisma.message.findMany({
       where: { conversationId: id },
       orderBy: { createdAt: 'asc' },
+      include: { reactions: true },
     });
     // Abrir a conversa = marcar como lida (atualiza ponteiro + avisa o peer).
     await this.markRead(userId, id);
@@ -293,7 +298,26 @@ export class ConversationsService {
     };
   }
 
-  private toMessageDto(m: Message, userId: string, peerLastReadAt: Date): MessageDto {
+  private aggregateReactions(
+    reactions: MessageReaction[] | undefined,
+    userId: string,
+  ): ReactionDto[] {
+    if (!reactions?.length) return [];
+    const byEmoji = new Map<string, { count: number; mine: boolean }>();
+    for (const r of reactions) {
+      const cur = byEmoji.get(r.emoji) ?? { count: 0, mine: false };
+      cur.count += 1;
+      if (r.userId === userId) cur.mine = true;
+      byEmoji.set(r.emoji, cur);
+    }
+    return [...byEmoji.entries()].map(([emoji, v]) => ({ emoji, ...v }));
+  }
+
+  private toMessageDto(
+    m: MessageWithReactions,
+    userId: string,
+    peerLastReadAt: Date,
+  ): MessageDto {
     const fromMe = m.senderId === userId;
     const status: MessageStatusDto =
       fromMe && peerLastReadAt >= m.createdAt
@@ -307,9 +331,49 @@ export class ConversationsService {
       text: m.text,
       mediaKey: m.mediaKey,
       mediaKind: m.mediaKind,
+      reactions: this.aggregateReactions(m.reactions, userId),
       status,
       createdAt: m.createdAt.toISOString(),
     };
+  }
+
+  /** Alterna (adiciona/remove) uma reação de emoji numa mensagem. */
+  async toggleReaction(
+    userId: string,
+    conversationId: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<{ messageId: string; reactions: ReactionDto[] }> {
+    const conv = await this.requireParticipant(userId, conversationId);
+    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!message || message.conversationId !== conversationId) {
+      throw new NotFoundException('Mensagem não encontrada.');
+    }
+    const existing = await this.prisma.messageReaction.findUnique({
+      where: { messageId_userId_emoji: { messageId, userId, emoji } },
+    });
+    let added: boolean;
+    if (existing) {
+      await this.prisma.messageReaction.delete({ where: { id: existing.id } });
+      added = false;
+    } else {
+      await this.prisma.messageReaction.create({ data: { messageId, userId, emoji } });
+      added = true;
+    }
+    const reactions = await this.prisma.messageReaction.findMany({ where: { messageId } });
+    // Notifica os dois lados (cada um recebe a agregação do SEU ponto de vista).
+    for (const p of conv.participants) {
+      this.gateway.pushToUser(p.userId, {
+        type: 'reaction',
+        conversationId,
+        messageId,
+        emoji,
+        userId,
+        added,
+        reactions: this.aggregateReactions(reactions, p.userId),
+      });
+    }
+    return { messageId, reactions: this.aggregateReactions(reactions, userId) };
   }
 
   /** Payload de mensagem para o WebSocket (o cliente deriva `fromMe` pelo senderId). */

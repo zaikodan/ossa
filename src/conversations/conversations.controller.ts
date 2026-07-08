@@ -29,6 +29,9 @@ const SendInput = z
   });
 type SendInput = z.infer<typeof SendInput>;
 
+const ReactInput = z.object({ emoji: z.string().min(1).max(16) });
+type ReactInput = z.infer<typeof ReactInput>;
+
 /**
  * REST das conversas. Tudo autenticado pelo JWT da plataforma; cada rota
  * confere participação. Paridade com o contrato consumido pela plataforma
@@ -78,5 +81,16 @@ export class ConversationsController {
     @CurrentUserId() userId: string,
   ): Promise<MessageDto> {
     return this.conversations.send(userId, id, body);
+  }
+
+  /** Alterna uma reação (emoji) numa mensagem. */
+  @Post(':id/messages/:messageId/reactions')
+  react(
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body(new ZodValidationPipe(ReactInput)) body: ReactInput,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.conversations.toggleReaction(userId, id, messageId, body.emoji);
   }
 }
