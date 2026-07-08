@@ -1,9 +1,12 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ENV, type Env } from '../config/env';
 import {
   MessageStatus,
   Prisma,
@@ -53,10 +56,38 @@ type ConvRow = Prisma.ConversationGetPayload<{
  */
 @Injectable()
 export class ConversationsService {
+  private readonly log = new Logger(ConversationsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: RealtimeGateway,
+    @Inject(ENV) private readonly env: Env,
   ) {}
+
+  /**
+   * Avisa a plataforma (webhook) que há mensagem p/ um destinatário OFFLINE,
+   * para ela enviar push. Fire-and-forget — nunca bloqueia/derruba o envio.
+   */
+  private notifyOfflineRecipient(payload: {
+    recipientId: string;
+    conversationId: string;
+    senderId: string;
+    hasText: boolean;
+    hasMedia: boolean;
+  }): void {
+    const url = this.env.PUSH_WEBHOOK_URL;
+    if (!url) return;
+    void fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(this.env.PUSH_WEBHOOK_SECRET
+          ? { 'x-ossa-secret': this.env.PUSH_WEBHOOK_SECRET }
+          : {}),
+      },
+      body: JSON.stringify(payload),
+    }).catch((e) => this.log.warn(`push webhook falhou: ${(e as Error).message}`));
+  }
 
   async getOrCreate(userId: string, peerId: string): Promise<ConversationDto> {
     if (userId === peerId) {
@@ -174,6 +205,15 @@ export class ConversationsService {
         type: 'message:delivered',
         conversationId: id,
         messageId: message.id,
+      });
+    } else if (peerId) {
+      // Destinatário offline → avisa a plataforma p/ enviar push.
+      this.notifyOfflineRecipient({
+        recipientId: peerId,
+        conversationId: id,
+        senderId: userId,
+        hasText: !!text,
+        hasMedia: !!mediaKey,
       });
     }
     return this.toMessageDto(message, userId, peerLastReadAt);

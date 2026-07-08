@@ -21,6 +21,14 @@ const EnvSchema = z.object({
   PRESENCE_HEARTBEAT_MS: z.coerce.number().int().positive().default(10_000),
   PRESENCE_TTL_SEC: z.coerce.number().int().positive().default(30),
   PRESENCE_REAP_MS: z.coerce.number().int().positive().default(15_000),
+  /**
+   * Webhook da plataforma p/ push notifications: quando uma mensagem vai a um
+   * destinatário OFFLINE, o Ossa avisa aqui (a plataforma dona das subscriptions
+   * envia o web-push). Opcional — se vazio, não dispara. `WEBHOOK_SECRET` vai no
+   * header p/ a plataforma validar.
+   */
+  PUSH_WEBHOOK_URL: z.string().url().optional(),
+  PUSH_WEBHOOK_SECRET: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
