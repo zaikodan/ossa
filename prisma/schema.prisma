@@ -47,8 +47,22 @@ model Message {
   mediaKind      String?
   status         MessageStatus @default(SENT)
   createdAt      DateTime      @default(now())
+  reactions      MessageReaction[]
 
   @@index([conversationId, createdAt])
+}
+
+/** Reação (emoji) de um usuário a uma mensagem. Uma por (msg, user, emoji). */
+model MessageReaction {
+  id        String   @id @default(cuid())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
 }
 
 enum MessageStatus {
