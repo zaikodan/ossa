@@ -48,6 +48,10 @@ model Message {
   status         MessageStatus @default(SENT)
   createdAt      DateTime      @default(now())
   reactions      MessageReaction[]
+  // Reply/quote: mensagem citada (opcional). SetNull se a citada for apagada.
+  replyToId      String?
+  replyTo        Message?      @relation("MessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        Message[]     @relation("MessageReply")
 
   @@index([conversationId, createdAt])
 }
