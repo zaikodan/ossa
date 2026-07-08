@@ -17,6 +17,10 @@ const EnvSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(16),
   /** Origem web permitida no CORS (o front consome via contrato). */
   WEB_ORIGIN: z.string().url().default('http://localhost:3000'),
+  /** Presença distribuída: heartbeat da instância, TTL e intervalo do reaper. */
+  PRESENCE_HEARTBEAT_MS: z.coerce.number().int().positive().default(10_000),
+  PRESENCE_TTL_SEC: z.coerce.number().int().positive().default(30),
+  PRESENCE_REAP_MS: z.coerce.number().int().positive().default(15_000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

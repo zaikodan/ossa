@@ -2,6 +2,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -11,10 +12,15 @@ import { ENV, type Env } from '../config/env';
 import { RedisService } from '../infra/redis/redis.service';
 import { verifyUserId } from '../auth/token';
 
-const HEARTBEAT_MS = 30_000;
+const WS_PING_MS = 30_000;
 /** Canal de fan-out por usuário e hash global de presença (contagem de conexões). */
 const userChannel = (userId: string): string => `ossa:user:${userId}`;
 const CONNS_KEY = 'ossa:conns';
+// Presença distribuída resiliente a crash: cada instância tem um heartbeat com
+// TTL e rastreia suas próprias conexões; um reaper reconcilia instâncias mortas.
+const INSTANCES_SET = 'ossa:instances';
+const aliveKey = (id: string): string => `ossa:inst:${id}:alive`;
+const instConnsKey = (id: string): string => `ossa:inst:${id}:conns`;
 
 /** Socket com estado anexado (userId + vivo p/ heartbeat). */
 interface UserSocket extends WebSocket {
@@ -48,13 +54,14 @@ export type PresenceHandler = (userId: string, online: boolean) => void;
  *  - heartbeat ping/pong.
  */
 @Injectable()
-export class RealtimeGateway implements OnModuleInit {
+export class RealtimeGateway implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger(RealtimeGateway.name);
   private readonly instanceId = randomUUID().slice(0, 8);
   private wss?: WebSocketServer;
   private readonly local = new Map<string, Set<UserSocket>>();
   private clientEventHandler?: ClientEventHandler;
   private presenceHandler?: PresenceHandler;
+  private timers: ReturnType<typeof setInterval>[] = [];
 
   constructor(
     @Inject(ENV) private readonly env: Env,
@@ -67,6 +74,77 @@ export class RealtimeGateway implements OnModuleInit {
       const userId = channel.slice('ossa:user:'.length);
       this.deliverLocal(userId, payload);
     });
+    // Presença resiliente: heartbeat da instância + reaper de instâncias mortas.
+    void this.heartbeat();
+    this.timers.push(setInterval(() => void this.heartbeat(), this.env.PRESENCE_HEARTBEAT_MS));
+    this.timers.push(setInterval(() => void this.reap(), this.env.PRESENCE_REAP_MS));
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    for (const t of this.timers) clearInterval(t);
+    // Shutdown gracioso: devolve as minhas conexões ao contador global.
+    try {
+      const mine = await this.redis.pub.hgetall(instConnsKey(this.instanceId));
+      for (const [uid, cntStr] of Object.entries(mine)) {
+        const cnt = Number(cntStr);
+        if (cnt > 0) await this.decrementGlobal(uid, cnt);
+      }
+      await this.redis.pub
+        .multi()
+        .del(instConnsKey(this.instanceId))
+        .del(aliveKey(this.instanceId))
+        .srem(INSTANCES_SET, this.instanceId)
+        .exec();
+    } catch {
+      /* redis pode já estar fechando */
+    }
+  }
+
+  /** Renova o heartbeat (com TTL) e registra a instância como viva. */
+  private async heartbeat(): Promise<void> {
+    await this.redis.pub
+      .multi()
+      .set(aliveKey(this.instanceId), '1', 'EX', this.env.PRESENCE_TTL_SEC)
+      .sadd(INSTANCES_SET, this.instanceId)
+      .exec();
+  }
+
+  /** Decrementa o contador global; dispara presença offline na transição p/ 0. */
+  private async decrementGlobal(userId: string, by: number): Promise<void> {
+    const now = await this.redis.pub.hincrby(CONNS_KEY, userId, -by);
+    if (now <= 0) {
+      await this.redis.pub.hdel(CONNS_KEY, userId);
+      this.presenceHandler?.(userId, false);
+    }
+  }
+
+  /**
+   * Reconcilia instâncias mortas: se o heartbeat expirou mas ainda há conexões
+   * contabilizadas, reivindica-as (RENAME atômico = exatamente uma vez) e as
+   * devolve ao contador global.
+   */
+  private async reap(): Promise<void> {
+    const ids = await this.redis.pub.smembers(INSTANCES_SET);
+    for (const id of ids) {
+      if (id === this.instanceId) continue;
+      if (await this.redis.pub.exists(aliveKey(id))) continue; // ainda viva
+      const claim = `ossa:reap:${id}:${this.instanceId}`;
+      try {
+        await this.redis.pub.rename(instConnsKey(id), claim); // reivindica
+      } catch {
+        await this.redis.pub.srem(INSTANCES_SET, id); // sem conns → só limpa
+        continue;
+      }
+      const conns = await this.redis.pub.hgetall(claim);
+      for (const [uid, cntStr] of Object.entries(conns)) {
+        const cnt = Number(cntStr);
+        if (cnt > 0) await this.decrementGlobal(uid, cnt);
+      }
+      await this.redis.pub.multi().del(claim).srem(INSTANCES_SET, id).exec();
+      this.log.warn(
+        `instância morta ${id} reconciliada (${Object.keys(conns).length} usuários)`,
+      );
+    }
   }
 
   setClientEventHandler(handler: ClientEventHandler): void {
@@ -82,15 +160,15 @@ export class RealtimeGateway implements OnModuleInit {
     this.wss.on('connection', (socket: UserSocket, req) => {
       void this.onConnection(socket, req);
     });
-    const heartbeat = setInterval(() => {
+    const ping = setInterval(() => {
       this.wss?.clients.forEach((client) => {
         const s = client as UserSocket;
         if (s.isAlive === false) return s.terminate();
         s.isAlive = false;
         s.ping();
       });
-    }, HEARTBEAT_MS);
-    this.wss.on('close', () => clearInterval(heartbeat));
+    }, WS_PING_MS);
+    this.wss.on('close', () => clearInterval(ping));
     this.log.log(`WebSocket server anexado em /ws (instância ${this.instanceId})`);
   }
 
@@ -136,6 +214,8 @@ export class RealtimeGateway implements OnModuleInit {
       await this.redis.sub.subscribe(userChannel(userId)); // 1º socket local desta instância
     }
     set.add(socket);
+    // Conta no global (presença) e no rastreio desta instância (crash-recovery).
+    await this.redis.pub.hincrby(instConnsKey(this.instanceId), userId, 1);
     const globalCount = await this.redis.pub.hincrby(CONNS_KEY, userId, 1);
     this.log.log(`conectado ${userId} (local ${set.size}, global ${globalCount})`);
     if (globalCount === 1) this.presenceHandler?.(userId, true); // transição global -> online
@@ -150,6 +230,7 @@ export class RealtimeGateway implements OnModuleInit {
         await this.redis.sub.unsubscribe(userChannel(userId));
       }
     }
+    await this.redis.pub.hincrby(instConnsKey(this.instanceId), userId, -1);
     const globalCount = await this.redis.pub.hincrby(CONNS_KEY, userId, -1);
     this.log.log(`desconectado ${userId} (global ${Math.max(0, globalCount)})`);
     if (globalCount <= 0) {
