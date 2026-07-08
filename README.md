@@ -105,6 +105,12 @@ Connect with `ws://…/ws?token=<platform-jwt>`. On success the server sends
 Messages sent while the peer is offline are marked **delivered** and the sender
 is notified the moment the peer reconnects.
 
+**Offline push:** when a message targets an offline recipient, Ossa fires an
+optional webhook (`PUSH_WEBHOOK_URL`, authenticated by `PUSH_WEBHOOK_SECRET`)
+with `{ recipientId, conversationId, senderId, hasText, hasMedia }` — the host
+platform owns push subscriptions and sends the actual web-push. Ossa stays
+notification-agnostic.
+
 ## Scaling (multi-instance)
 
 Ossa runs behind a load balancer with **no sticky sessions**. Each instance
@@ -132,7 +138,7 @@ never leaks. Graceful shutdown returns the instance's connections directly.
 - [x] Reply / quote (`replyToId` + quoted preview)
 - [x] Presence crash-recovery (per-instance heartbeat + reaper)
 - [x] Tests (unit + e2e) running in CI with Postgres + Redis services
-- [ ] Push notifications
+- [x] Offline push webhook (platform owns subscriptions + web-push delivery)
 
 ## Tests
 
