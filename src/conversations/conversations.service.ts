@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../infra/prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { aggregateReactions } from './reactions.util';
 import type {
   ConversationDto,
   MessageDto,
@@ -325,15 +326,7 @@ export class ConversationsService {
     reactions: MessageReaction[] | undefined,
     userId: string,
   ): ReactionDto[] {
-    if (!reactions?.length) return [];
-    const byEmoji = new Map<string, { count: number; mine: boolean }>();
-    for (const r of reactions) {
-      const cur = byEmoji.get(r.emoji) ?? { count: 0, mine: false };
-      cur.count += 1;
-      if (r.userId === userId) cur.mine = true;
-      byEmoji.set(r.emoji, cur);
-    }
-    return [...byEmoji.entries()].map(([emoji, v]) => ({ emoji, ...v }));
+    return aggregateReactions(reactions, userId);
   }
 
   private toMessageDto(
