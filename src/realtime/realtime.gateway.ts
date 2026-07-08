@@ -29,6 +29,7 @@ export interface ClientEvent {
   text?: string;
   mediaKey?: string;
   mediaKind?: string;
+  replyToId?: string;
   typing?: boolean;
 }
 

@@ -13,6 +13,14 @@ export interface ReactionDto {
   mine: boolean;
 }
 
+/** Preview da mensagem citada (reply/quote). */
+export interface ReplyPreviewDto {
+  id: string;
+  senderId: string;
+  text: string;
+  mediaKind: string | null;
+}
+
 export interface ConversationDto {
   id: string;
   /** userId do outro participante (1:1). */
@@ -33,6 +41,7 @@ export interface MessageDto {
   mediaKey: string | null;
   mediaKind: string | null;
   reactions: ReactionDto[];
+  replyTo: ReplyPreviewDto | null;
   status: MessageStatusDto;
   /** ISO-8601. */
   createdAt: string;
@@ -43,4 +52,5 @@ export interface SendMessageInput {
   text?: string;
   mediaKey?: string;
   mediaKind?: string;
+  replyToId?: string;
 }

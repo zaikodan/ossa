@@ -40,6 +40,7 @@ export class RealtimeMessagingService implements OnModuleInit {
               text: event.text,
               mediaKey: event.mediaKey,
               mediaKind: event.mediaKind,
+              replyToId: event.replyToId,
             });
           }
           break;

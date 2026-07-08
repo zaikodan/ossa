@@ -18,10 +18,21 @@ import type {
   MessageDto,
   MessageStatusDto,
   ReactionDto,
+  ReplyPreviewDto,
   SendMessageInput,
 } from './conversations.dto';
 
-type MessageWithReactions = Message & { reactions?: MessageReaction[] };
+const replyPreviewSelect = {
+  id: true,
+  senderId: true,
+  text: true,
+  mediaKind: true,
+} satisfies Prisma.MessageSelect;
+
+type MessageWithReactions = Message & {
+  reactions?: MessageReaction[];
+  replyTo?: ReplyPreviewDto | null;
+};
 
 const EPOCH = new Date(0);
 
@@ -93,7 +104,7 @@ export class ConversationsService {
     const messages = await this.prisma.message.findMany({
       where: { conversationId: id },
       orderBy: { createdAt: 'asc' },
-      include: { reactions: true },
+      include: { reactions: true, replyTo: { select: replyPreviewSelect } },
     });
     // Abrir a conversa = marcar como lida (atualiza ponteiro + avisa o peer).
     await this.markRead(userId, id);
@@ -108,6 +119,16 @@ export class ConversationsService {
       throw new BadRequestException('Mensagem vazia: informe texto ou mídia.');
     }
     const conv = await this.requireParticipant(userId, id, ForbiddenException);
+
+    // Reply: só aceita citar mensagem da MESMA conversa.
+    let replyToId: string | null = null;
+    if (input.replyToId) {
+      const replied = await this.prisma.message.findUnique({
+        where: { id: input.replyToId },
+        select: { conversationId: true },
+      });
+      if (replied?.conversationId === id) replyToId = input.replyToId;
+    }
     const peer = this.peer(conv.participants, userId);
     const peerId = peer?.userId;
     const peerLastReadAt = peer?.lastReadAt ?? EPOCH;
@@ -123,8 +144,10 @@ export class ConversationsService {
           text,
           mediaKey,
           mediaKind: mediaKey ? (input.mediaKind ?? null) : null,
+          replyToId,
           status,
         },
+        include: { replyTo: { select: replyPreviewSelect } },
       }),
       this.prisma.conversation.update({ where: { id }, data: { lastMessageAt: now } }),
       this.prisma.participant.updateMany({
@@ -332,6 +355,7 @@ export class ConversationsService {
       mediaKey: m.mediaKey,
       mediaKind: m.mediaKind,
       reactions: this.aggregateReactions(m.reactions, userId),
+      replyTo: m.replyTo ?? null,
       status,
       createdAt: m.createdAt.toISOString(),
     };
