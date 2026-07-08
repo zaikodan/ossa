@@ -67,7 +67,11 @@ profiles — mapping `peerId` to a display name/avatar is the consumer's job.
 | `GET`  | `/conversations`              | —           | caller's conversations (peer, last, unread) |
 | `GET`  | `/conversations/:id`          | —           | one conversation (or `null` if not a member) |
 | `GET`  | `/conversations/:id/messages` | —           | messages (marks them read on the caller's side) |
-| `POST` | `/conversations/:id/messages` | `{ text }`  | send a message                          |
+| `POST` | `/conversations/:id/messages` | `{ text?, mediaKey?, mediaKind? }` | send a message (text and/or media) |
+
+Ossa is media-agnostic: a message may carry an opaque `mediaKey` (+ `mediaKind`)
+that references a file the **host platform** stores and serves (Ossa never holds
+the bytes). Messages echo `mediaKey`/`mediaKind`; the platform signs a URL.
 
 Read receipts (`sent | delivered | read`) are derived from each side's read
 pointer, kept live by the realtime protocol below.
@@ -81,7 +85,7 @@ Connect with `ws://…/ws?token=<platform-jwt>`. On success the server sends
 
 | Event | Payload | Effect |
 | ----- | ------- | ------ |
-| `message:send` | `{ conversationId, text }` | persist + deliver to the peer |
+| `message:send` | `{ conversationId, text?, mediaKey?, mediaKind? }` | persist + deliver to the peer |
 | `read` | `{ conversationId }` | mark the peer's messages read |
 | `typing` | `{ conversationId, typing }` | relay a typing indicator |
 | `ping` | — | `pong` heartbeat |
@@ -90,7 +94,7 @@ Connect with `ws://…/ws?token=<platform-jwt>`. On success the server sends
 
 | Event | Payload |
 | ----- | ------- |
-| `message:new` | `{ message: { id, conversationId, senderId, text, status, createdAt } }` |
+| `message:new` | `{ message: { id, conversationId, senderId, text, mediaKey, mediaKind, status, createdAt } }` |
 | `message:delivered` | `{ conversationId, messageId }` — the peer received it (or came online) |
 | `message:read` | `{ conversationId, readerId, readAt }` — the peer read it |
 | `typing` | `{ conversationId, userId, typing }` |
@@ -120,7 +124,8 @@ holds only its local sockets; cross-instance delivery goes through **Redis**:
 - [x] REST API: conversations & messages (unread + read receipts), JWT-guarded
 - [x] Realtime protocol: `message:new`, `typing`, live `delivered`/`read`, presence
 - [x] Redis pub/sub fan-out (multi-instance) + distributed presence
-- [ ] Media messages (gated/signed URLs), push notifications, reactions, reply
+- [x] Media references in messages (`mediaKey`; platform stores/serves/signs)
+- [ ] Push notifications, reactions, reply/quote
 - [ ] Tests + coverage
 - [ ] Presence crash-recovery (per-instance heartbeat)
 
