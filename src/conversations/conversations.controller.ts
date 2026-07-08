@@ -18,7 +18,15 @@ import type { ConversationDto, MessageDto } from './conversations.dto';
 const StartInput = z.object({ peerId: z.string().min(1).max(200) });
 type StartInput = z.infer<typeof StartInput>;
 
-const SendInput = z.object({ text: z.string().trim().min(1).max(4000) });
+const SendInput = z
+  .object({
+    text: z.string().trim().max(4000).optional(),
+    mediaKey: z.string().max(200).optional(),
+    mediaKind: z.enum(['photo', 'video']).optional(),
+  })
+  .refine((v) => !!v.text || !!v.mediaKey, {
+    message: 'Informe texto ou mídia.',
+  });
 type SendInput = z.infer<typeof SendInput>;
 
 /**
@@ -69,6 +77,6 @@ export class ConversationsController {
     @Body(new ZodValidationPipe(SendInput)) body: SendInput,
     @CurrentUserId() userId: string,
   ): Promise<MessageDto> {
-    return this.conversations.send(userId, id, body.text);
+    return this.conversations.send(userId, id, body);
   }
 }

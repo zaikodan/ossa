@@ -35,8 +35,12 @@ export class RealtimeMessagingService implements OnModuleInit {
     try {
       switch (event.type) {
         case 'message:send':
-          if (event.conversationId && event.text?.trim()) {
-            await this.conversations.send(userId, event.conversationId, event.text.trim());
+          if (event.conversationId && (event.text?.trim() || event.mediaKey)) {
+            await this.conversations.send(userId, event.conversationId, {
+              text: event.text,
+              mediaKey: event.mediaKey,
+              mediaKind: event.mediaKind,
+            });
           }
           break;
         case 'read':

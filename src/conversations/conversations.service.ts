@@ -16,6 +16,7 @@ import type {
   ConversationDto,
   MessageDto,
   MessageStatusDto,
+  SendMessageInput,
 } from './conversations.dto';
 
 const EPOCH = new Date(0);
@@ -94,8 +95,13 @@ export class ConversationsService {
     return { items: messages.map((m) => this.toMessageDto(m, userId, peerLastReadAt)) };
   }
 
-  /** Envia uma mensagem. Persiste, entrega em tempo real e devolve o recibo. */
-  async send(userId: string, id: string, text: string): Promise<MessageDto> {
+  /** Envia uma mensagem (texto e/ou mídia). Persiste, entrega e devolve o recibo. */
+  async send(userId: string, id: string, input: SendMessageInput): Promise<MessageDto> {
+    const text = input.text?.trim() ?? '';
+    const mediaKey = input.mediaKey ?? null;
+    if (!text && !mediaKey) {
+      throw new BadRequestException('Mensagem vazia: informe texto ou mídia.');
+    }
     const conv = await this.requireParticipant(userId, id, ForbiddenException);
     const peer = this.peer(conv.participants, userId);
     const peerId = peer?.userId;
@@ -106,7 +112,14 @@ export class ConversationsService {
 
     const [message] = await this.prisma.$transaction([
       this.prisma.message.create({
-        data: { conversationId: id, senderId: userId, text, status },
+        data: {
+          conversationId: id,
+          senderId: userId,
+          text,
+          mediaKey,
+          mediaKind: mediaKey ? (input.mediaKind ?? null) : null,
+          status,
+        },
       }),
       this.prisma.conversation.update({ where: { id }, data: { lastMessageAt: now } }),
       this.prisma.participant.updateMany({
@@ -292,6 +305,8 @@ export class ConversationsService {
       senderId: m.senderId,
       fromMe,
       text: m.text,
+      mediaKey: m.mediaKey,
+      mediaKind: m.mediaKind,
       status,
       createdAt: m.createdAt.toISOString(),
     };
@@ -303,6 +318,8 @@ export class ConversationsService {
     conversationId: string;
     senderId: string;
     text: string;
+    mediaKey: string | null;
+    mediaKind: string | null;
     status: MessageStatusDto;
     createdAt: string;
   } {
@@ -311,6 +328,8 @@ export class ConversationsService {
       conversationId: m.conversationId,
       senderId: m.senderId,
       text: m.text,
+      mediaKey: m.mediaKey,
+      mediaKind: m.mediaKind,
       status: m.status.toLowerCase() as MessageStatusDto,
       createdAt: m.createdAt.toISOString(),
     };

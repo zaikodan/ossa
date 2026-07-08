@@ -27,6 +27,8 @@ export interface ClientEvent {
   type: string;
   conversationId?: string;
   text?: string;
+  mediaKey?: string;
+  mediaKind?: string;
   typing?: boolean;
 }
 

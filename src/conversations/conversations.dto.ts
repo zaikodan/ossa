@@ -22,7 +22,17 @@ export interface MessageDto {
   senderId: string;
   fromMe: boolean;
   text: string;
+  /** Chave da mídia no storage da plataforma (Ossa não serve arquivos). */
+  mediaKey: string | null;
+  mediaKind: string | null;
   status: MessageStatusDto;
   /** ISO-8601. */
   createdAt: string;
+}
+
+/** Entrada de envio: texto e/ou mídia (pelo menos um). */
+export interface SendMessageInput {
+  text?: string;
+  mediaKey?: string;
+  mediaKind?: string;
 }
