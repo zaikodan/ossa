@@ -67,7 +67,7 @@ profiles — mapping `peerId` to a display name/avatar is the consumer's job.
 | `GET`  | `/conversations`              | —           | caller's conversations (peer, last, unread) |
 | `GET`  | `/conversations/:id`          | —           | one conversation (or `null` if not a member) |
 | `GET`  | `/conversations/:id/messages` | —           | messages (marks them read on the caller's side) |
-| `POST` | `/conversations/:id/messages` | `{ text?, mediaKey?, mediaKind? }` | send a message (text and/or media) |
+| `POST` | `/conversations/:id/messages` | `{ text?, mediaKey?, mediaKind?, replyToId? }` | send a message (text/media, optionally a reply) |
 | `POST` | `/conversations/:id/messages/:messageId/reactions` | `{ emoji }` | toggle an emoji reaction |
 
 Ossa is media-agnostic: a message may carry an opaque `mediaKey` (+ `mediaKind`)
@@ -86,7 +86,7 @@ Connect with `ws://…/ws?token=<platform-jwt>`. On success the server sends
 
 | Event | Payload | Effect |
 | ----- | ------- | ------ |
-| `message:send` | `{ conversationId, text?, mediaKey?, mediaKind? }` | persist + deliver to the peer |
+| `message:send` | `{ conversationId, text?, mediaKey?, mediaKind?, replyToId? }` | persist + deliver to the peer |
 | `read` | `{ conversationId }` | mark the peer's messages read |
 | `typing` | `{ conversationId, typing }` | relay a typing indicator |
 | `ping` | — | `pong` heartbeat |
@@ -128,7 +128,8 @@ holds only its local sockets; cross-instance delivery goes through **Redis**:
 - [x] Redis pub/sub fan-out (multi-instance) + distributed presence
 - [x] Media references in messages (`mediaKey`; platform stores/serves/signs)
 - [x] Emoji reactions (per-viewer aggregation + realtime `reaction`)
-- [ ] Push notifications, reply/quote
+- [x] Reply / quote (`replyToId` + quoted preview)
+- [ ] Push notifications
 - [ ] Tests + coverage
 - [ ] Presence crash-recovery (per-instance heartbeat)
 
