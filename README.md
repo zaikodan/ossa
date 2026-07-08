@@ -115,9 +115,10 @@ holds only its local sockets; cross-instance delivery goes through **Redis**:
 - **Presence** is a global connection counter (`ossa:conns` hash); `online`
   events fire only on the global offline↔online transition.
 
-> Caveat: the presence counter is decremented on disconnect but not yet
-> reconciled after an ungraceful instance crash — a per-instance heartbeat key
-> is the planned hardening.
+**Crash recovery:** each instance renews a heartbeat key with a TTL and tracks
+its own connections; a reaper claims (atomic `RENAME`) and reconciles the global
+counter for any instance whose heartbeat expired (ungraceful crash), so presence
+never leaks. Graceful shutdown returns the instance's connections directly.
 
 ## Roadmap
 
@@ -129,9 +130,9 @@ holds only its local sockets; cross-instance delivery goes through **Redis**:
 - [x] Media references in messages (`mediaKey`; platform stores/serves/signs)
 - [x] Emoji reactions (per-viewer aggregation + realtime `reaction`)
 - [x] Reply / quote (`replyToId` + quoted preview)
+- [x] Presence crash-recovery (per-instance heartbeat + reaper)
 - [ ] Push notifications
 - [ ] Tests + coverage
-- [ ] Presence crash-recovery (per-instance heartbeat)
 
 ## License
 
