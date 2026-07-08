@@ -68,6 +68,7 @@ profiles — mapping `peerId` to a display name/avatar is the consumer's job.
 | `GET`  | `/conversations/:id`          | —           | one conversation (or `null` if not a member) |
 | `GET`  | `/conversations/:id/messages` | —           | messages (marks them read on the caller's side) |
 | `POST` | `/conversations/:id/messages` | `{ text?, mediaKey?, mediaKind? }` | send a message (text and/or media) |
+| `POST` | `/conversations/:id/messages/:messageId/reactions` | `{ emoji }` | toggle an emoji reaction |
 
 Ossa is media-agnostic: a message may carry an opaque `mediaKey` (+ `mediaKind`)
 that references a file the **host platform** stores and serves (Ossa never holds
@@ -99,6 +100,7 @@ Connect with `ws://…/ws?token=<platform-jwt>`. On success the server sends
 | `message:read` | `{ conversationId, readerId, readAt }` — the peer read it |
 | `typing` | `{ conversationId, userId, typing }` |
 | `presence` | `{ userId, online }` |
+| `reaction` | `{ conversationId, messageId, emoji, userId, added, reactions }` |
 
 Messages sent while the peer is offline are marked **delivered** and the sender
 is notified the moment the peer reconnects.
@@ -125,7 +127,8 @@ holds only its local sockets; cross-instance delivery goes through **Redis**:
 - [x] Realtime protocol: `message:new`, `typing`, live `delivered`/`read`, presence
 - [x] Redis pub/sub fan-out (multi-instance) + distributed presence
 - [x] Media references in messages (`mediaKey`; platform stores/serves/signs)
-- [ ] Push notifications, reactions, reply/quote
+- [x] Emoji reactions (per-viewer aggregation + realtime `reaction`)
+- [ ] Push notifications, reply/quote
 - [ ] Tests + coverage
 - [ ] Presence crash-recovery (per-instance heartbeat)
 
