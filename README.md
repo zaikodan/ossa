@@ -131,8 +131,18 @@ never leaks. Graceful shutdown returns the instance's connections directly.
 - [x] Emoji reactions (per-viewer aggregation + realtime `reaction`)
 - [x] Reply / quote (`replyToId` + quoted preview)
 - [x] Presence crash-recovery (per-instance heartbeat + reaper)
+- [x] Tests (unit + e2e) running in CI with Postgres + Redis services
 - [ ] Push notifications
-- [ ] Tests + coverage
+
+## Tests
+
+```bash
+docker compose up -d        # Postgres + Redis
+pnpm prisma migrate deploy
+pnpm test                   # unit (token, reactions) + e2e (conversations/reactions/reply)
+```
+
+CI runs the same suite against Postgres + Redis service containers on every push/PR.
 
 ## License
 
