@@ -40,7 +40,11 @@ model Message {
   conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId String
   senderId       String
-  text           String
+  text           String        @default("")
+  // Mídia opcional. Ossa é agnóstico: guarda só a CHAVE (a plataforma
+  // armazena/serve o arquivo e assina a URL). mediaKind é opaco ('photo'|'video').
+  mediaKey       String?
+  mediaKind      String?
   status         MessageStatus @default(SENT)
   createdAt      DateTime      @default(now())
 
