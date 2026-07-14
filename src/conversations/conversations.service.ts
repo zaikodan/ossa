@@ -138,8 +138,9 @@ export class ConversationsService {
       orderBy: { createdAt: 'asc' },
       include: { reactions: true, replyTo: { select: replyPreviewSelect } },
     });
-    // Abrir a conversa = marcar como lida (atualiza ponteiro + avisa o peer).
-    await this.markRead(userId, id);
+    // NÃO marca leitura aqui: isso é feito pela ação explícita `read` (WS). Marcar
+    // no GET emitia `message:read`, e como o cliente refaz a busca ao receber esse
+    // evento, os dois lados entravam num laço infinito de leitura/refetch.
     return { items: messages.map((m) => this.toMessageDto(m, userId, peerLastReadAt)) };
   }
 
