@@ -22,7 +22,7 @@ const SendInput = z
   .object({
     text: z.string().trim().max(4000).optional(),
     mediaKey: z.string().max(200).optional(),
-    mediaKind: z.enum(['photo', 'video']).optional(),
+    mediaKind: z.enum(['photo', 'video', 'audio']).optional(),
     replyToId: z.string().max(60).optional(),
   })
   .refine((v) => !!v.text || !!v.mediaKey, {
