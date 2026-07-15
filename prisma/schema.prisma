@@ -45,6 +45,9 @@ model Message {
   // armazena/serve o arquivo e assina a URL). mediaKind é opaco ('photo'|'video').
   mediaKey       String?
   mediaKind      String?
+  // Álbum: múltiplas mídias numa mensagem (WhatsApp). Array de { key, kind }.
+  // Quando presente (2+), a UI mostra em grade; mediaKey/mediaKind ficam nulos.
+  mediaItems     Json?
   status         MessageStatus @default(SENT)
   createdAt      DateTime      @default(now())
   reactions      MessageReaction[]

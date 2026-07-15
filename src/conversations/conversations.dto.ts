@@ -21,6 +21,12 @@ export interface ReplyPreviewDto {
   mediaKind: string | null;
 }
 
+/** Item de mídia (chave no storage da plataforma + tipo opaco). */
+export interface MediaItemDto {
+  key: string;
+  kind: string;
+}
+
 export interface ConversationDto {
   id: string;
   /** userId do outro participante (1:1). */
@@ -40,6 +46,8 @@ export interface MessageDto {
   /** Chave da mídia no storage da plataforma (Ossa não serve arquivos). */
   mediaKey: string | null;
   mediaKind: string | null;
+  /** Álbum: várias mídias numa mensagem (vazio quando não é álbum). */
+  mediaItems: MediaItemDto[];
   reactions: ReactionDto[];
   replyTo: ReplyPreviewDto | null;
   status: MessageStatusDto;
@@ -52,5 +60,7 @@ export interface SendMessageInput {
   text?: string;
   mediaKey?: string;
   mediaKind?: string;
+  /** Álbum: 2+ mídias numa mensagem. */
+  mediaItems?: { mediaKey: string; mediaKind?: string }[];
   replyToId?: string;
 }

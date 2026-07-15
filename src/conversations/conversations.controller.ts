@@ -23,9 +23,18 @@ const SendInput = z
     text: z.string().trim().max(4000).optional(),
     mediaKey: z.string().max(200).optional(),
     mediaKind: z.enum(['photo', 'video', 'audio', 'sticker', 'gif']).optional(),
+    mediaItems: z
+      .array(
+        z.object({
+          mediaKey: z.string().max(200),
+          mediaKind: z.enum(['photo', 'video', 'audio', 'sticker', 'gif']).optional(),
+        }),
+      )
+      .max(10)
+      .optional(),
     replyToId: z.string().max(60).optional(),
   })
-  .refine((v) => !!v.text || !!v.mediaKey, {
+  .refine((v) => !!v.text || !!v.mediaKey || (v.mediaItems?.length ?? 0) > 0, {
     message: 'Informe texto ou mídia.',
   });
 type SendInput = z.infer<typeof SendInput>;

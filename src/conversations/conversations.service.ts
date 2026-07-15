@@ -144,11 +144,25 @@ export class ConversationsService {
     return { items: messages.map((m) => this.toMessageDto(m, userId, peerLastReadAt)) };
   }
 
+  /** Normaliza o array de álbum vindo do input (ou do JSON persistido). */
+  private parseMediaItems(raw: unknown): { key: string; kind: string }[] {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((x) => x as { key?: unknown; kind?: unknown; mediaKey?: unknown; mediaKind?: unknown })
+      .map((x) => ({
+        key: typeof x.key === 'string' ? x.key : typeof x.mediaKey === 'string' ? x.mediaKey : '',
+        kind:
+          typeof x.kind === 'string' ? x.kind : typeof x.mediaKind === 'string' ? x.mediaKind : 'photo',
+      }))
+      .filter((x) => x.key);
+  }
+
   /** Envia uma mensagem (texto e/ou mídia). Persiste, entrega e devolve o recibo. */
   async send(userId: string, id: string, input: SendMessageInput): Promise<MessageDto> {
     const text = input.text?.trim() ?? '';
     const mediaKey = input.mediaKey ?? null;
-    if (!text && !mediaKey) {
+    const album = this.parseMediaItems(input.mediaItems);
+    if (!text && !mediaKey && album.length === 0) {
       throw new BadRequestException('Mensagem vazia: informe texto ou mídia.');
     }
     const conv = await this.requireParticipant(userId, id, ForbiddenException);
@@ -177,6 +191,7 @@ export class ConversationsService {
           text,
           mediaKey,
           mediaKind: mediaKey ? (input.mediaKind ?? null) : null,
+          mediaItems: album.length ? album : undefined,
           replyToId,
           status,
         },
@@ -388,6 +403,7 @@ export class ConversationsService {
       text: m.text,
       mediaKey: m.mediaKey,
       mediaKind: m.mediaKind,
+      mediaItems: this.parseMediaItems(m.mediaItems),
       reactions: this.aggregateReactions(m.reactions, userId),
       replyTo: m.replyTo ?? null,
       status,
@@ -442,6 +458,7 @@ export class ConversationsService {
     text: string;
     mediaKey: string | null;
     mediaKind: string | null;
+    mediaItems: { key: string; kind: string }[];
     status: MessageStatusDto;
     createdAt: string;
   } {
@@ -452,6 +469,7 @@ export class ConversationsService {
       text: m.text,
       mediaKey: m.mediaKey,
       mediaKind: m.mediaKind,
+      mediaItems: this.parseMediaItems(m.mediaItems),
       status: m.status.toLowerCase() as MessageStatusDto,
       createdAt: m.createdAt.toISOString(),
     };
